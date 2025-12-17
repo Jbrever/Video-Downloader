@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Video Scraper & Downloader</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+        }
+    </style>
+</head>
+
+<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col items-center justify-center p-4">
+
+    <div class="w-full max-w-lg bg-gray-800 rounded-xl shadow-2xl overflow-hidden border border-gray-700">
+        <!-- Header -->
+        <div class="bg-gradient-to-r from-blue-600 to-indigo-600 p-6 text-center">
+            <h1 class="text-3xl font-bold text-white mb-2">Video Scraper</h1>
+            <p class="text-blue-100 text-sm">Download videos from almost any URL</p>
+        </div>
+
+        <!-- Content -->
+        <div class="p-8">
+            <form id="downloadForm" class="space-y-6">
+                <div>
+                    <label for="url" class="block text-sm font-medium text-gray-300 mb-2">Page URL</label>
+                    <div class="relative">
+                        <input type="url" id="url" name="url" required placeholder="https://example.com/video-page"
+                            class="w-full bg-gray-700 border border-gray-600 text-white rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition placeholder-gray-500">
+                    </div>
+                </div>
+
+                <div id="statusArea" class="hidden rounded-lg p-4">
+                    <div class="flex items-center space-x-3">
+                        <div id="statusIcon"></div>
+                        <div>
+                            <p id="statusTitle" class="font-semibold"></p>
+                            <p id="statusMessage" class="text-sm opacity-90"></p>
+                        </div>
+                    </div>
+                    <!-- Progress bar for "Downloading" state if we can capture progress, for now valid only implies detection -->
+                    <div id="loader" class="hidden mt-3 h-1 w-full bg-blue-200 rounded-full overflow-hidden">
+                        <div class="animate-pulse bg-blue-500 h-full w-full rounded-full"></div>
+                    </div>
+                </div>
+
+                <button type="submit" id="submitBtn"
+                    class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition transform hover:scale-[1.02] active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800 disabled:opacity-50 disabled:cursor-not-allowed">
+                    Download Video
+                </button>
+            </form>
+        </div>
+
+        <!-- Footer -->
+        <div class="bg-gray-900/50 p-4 text-center border-t border-gray-700">
+            <p class="text-xs text-gray-500">Supported formats: MP4, WebM, M3U8 (Converted)</p>
+        </div>
+    </div>
+
+    <script>
+        const form = document.getElementById('downloadForm');
+        const submitBtn = document.getElementById('submitBtn');
+        const statusArea = document.getElementById('statusArea');
+        const statusTitle = document.getElementById('statusTitle');
+        const statusMessage = document.getElementById('statusMessage');
+        const loader = document.getElementById('loader');
+
+        form.addEventListener('submit', async (e) => {
+            e.preventDefault();
+            const url = document.getElementById('url').value;
+
+            // Reset state
+            const resultsList = document.getElementById('resultsList');
+            if (resultsList) resultsList.remove();
+
+            setUIState('loading', 'Searching for video...', 'Launching browser to detect media resources. This may take up to 30 seconds.');
+
+            try {
+                // Step 1: Resolve the video URL
+                const response = await fetch(`/api/resolve?url=${encodeURIComponent(url)}`);
+                const data = await response.json();
+
+                if (!response.ok) {
+                    throw new Error(data.error || 'Failed to resolve video');
+                }
+
+                const videos = data.videos || [];
+
+                if (videos.length === 0) {
+                    throw new Error('No videos returned');
+                } else if (videos.length === 1) {
+                    // Single video found - Direct download
+                    startDownload(videos[0]);
+                } else {
+                    // Multiple videos found - Show list
+                    setUIState('success', 'Multiple Videos Found', `Found ${videos.length} videos. Please select one to download.`);
+                    renderVideoList(videos);
+                }
+
+            } catch (error) {
+                setUIState('error', 'Error', error.message);
+            }
+        });
+
+        function startDownload(videoData) {
+            // Show buffering status above list
+            const bufferStatus = document.getElementById('bufferStatus');
+            if (bufferStatus) {
+                bufferStatus.classList.remove('hidden');
+                bufferStatus.innerHTML = `
+                    <div class="flex items-center space-x-2 text-yellow-300">
+                        <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
+                        <span class="font-semibold">Buffering & Processing Video... Download will start soon.</span>
+                    </div>
+                 `;
+            }
+
+            // Trigger actual download via hidden iframe or window location
+            const downloadUrl = `/api/download?videoUrl=${encodeURIComponent(videoData.videoUrl)}&type=${videoData.type}`;
+            window.location.href = downloadUrl;
+        }
+
+        function renderVideoList(videos) {
+            // Check if list already exists (to prevent duplicates if re-rendering)
+            let listContainer = document.getElementById('resultsList');
+            if (listContainer) listContainer.remove();
+
+            listContainer = document.createElement('div');
+            listContainer.id = 'resultsList';
+            listContainer.className = 'mt-6 bg-gray-800 rounded-lg p-4 border border-gray-700 space-y-3';
+
+            // Add Buffering Status Area ABOVE the items
+            const bufferDiv = document.createElement('div');
+            bufferDiv.id = 'bufferStatus';
+            bufferDiv.className = 'hidden mb-4 p-3 bg-yellow-900/40 border border-yellow-700 rounded text-sm';
+            listContainer.appendChild(bufferDiv);
+
+            videos.forEach((video, index) => {
+                const item = document.createElement('div');
+                item.className = 'flex items-center gap-4 bg-gray-700 p-3 rounded hover:bg-gray-600 transition';
+
+                // Thumbnail
+                const img = document.createElement('img');
+                img.src = video.thumbnail;
+                img.className = 'w-24 h-16 object-cover rounded bg-gray-800';
+                img.onerror = () => { img.src = 'https://via.placeholder.com/150?text=No+Img'; };
+
+                const info = document.createElement('div');
+                info.className = 'text-sm text-gray-200 overflow-hidden flex-1';
+                info.innerHTML = `
+                    <p class="font-semibold">Video ${index + 1}</p>
+                    <p class="text-xs text-gray-400 truncate w-full" title="${video.videoUrl}">${video.videoUrl}</p>
+                    <div class="flex gap-2 mt-1">
+                        <span class="inline-block px-2 py-0.5 rounded text-xs font-bold ${video.type === 'direct' ? 'bg-green-900 text-green-300' : 'bg-yellow-900 text-yellow-300'}">
+                            ${video.type.toUpperCase()}
+                        </span>
+                        ${video.size ? `<span class="inline-block px-2 py-0.5 rounded text-xs font-bold bg-gray-600 text-gray-300">${video.size}</span>` : ''}
+                    </div>
+                `;
+
+                const btn = document.createElement('button');
+                btn.className = 'bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium py-1.5 px-3 rounded transition shrink-0';
+                btn.innerText = 'Download';
+                btn.onclick = () => startDownload(video);
+
+                item.appendChild(img);
+                item.appendChild(info);
+                item.appendChild(btn);
+                listContainer.appendChild(item);
+            });
+
+            // Append after status area
+            statusArea.insertAdjacentElement('afterend', listContainer);
+        }
+
+        function setUIState(state, title = '', message = '') {
+            statusArea.classList.remove('hidden', 'bg-blue-900/50', 'text-blue-200', 'bg-red-900/50', 'text-red-200', 'bg-green-900/50', 'text-green-200');
+            statusArea.classList.add('flex');
+            loader.classList.add('hidden');
+            submitBtn.disabled = false;
+            submitBtn.innerText = 'Download Video';
+
+            // Remove existing list ONLY if loading (new search)
+            if (state === 'loading') {
+                const existingList = document.getElementById('resultsList');
+                if (existingList) existingList.remove();
+            }
+
+            // Ensure inputs are visible (restore from previous state if needed)
+            document.getElementById('downloadForm').querySelector('div').classList.remove('hidden');
+            submitBtn.classList.remove('hidden');
+
+            if (state === 'idle') {
+                statusArea.classList.add('hidden');
+                return;
+            }
+
+            statusTitle.innerText = title;
+            statusMessage.innerText = message;
+
+            if (state === 'loading') {
+                statusArea.classList.add('bg-blue-900/50', 'text-blue-200');
+                loader.classList.remove('hidden');
+                submitBtn.disabled = true;
+                submitBtn.innerText = 'Processing...';
+            } else if (state === 'success') {
+                statusArea.classList.add('bg-green-900/50', 'text-green-200');
+            } else if (state === 'error') {
+                statusArea.classList.add('bg-red-900/50', 'text-red-200');
+            }
+        }
+    </script>
+</body>
+
+</html>
