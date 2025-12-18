@@ -46,17 +46,20 @@ In your Render service settings, go to **Environment** section and add these var
 #### Required Environment Variables:
 ```
 NODE_ENV=production
-PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=false
 DEBUG_PUPPETEER=true
-DEBUG_FFMPEG=false
 VERBOSE_LOGGING=true
 ```
 
-#### Optional Environment Variables (Chrome paths auto-detected):
+#### Optional Environment Variables:
 ```
-PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
-CHROME_BIN=/usr/bin/google-chrome-stable
+PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=false
+DEBUG_FFMPEG=false
+MAX_VIDEO_SIZE_MB=500
+DOWNLOAD_TIMEOUT_MS=300000
+PUPPETEER_TIMEOUT_MS=30000
 ```
+
+**Note:** Chrome paths are now auto-detected. Do NOT set `PUPPETEER_EXECUTABLE_PATH` or `CHROME_BIN` unless you have a specific Chrome installation path that needs to be used.
 
 #### Optional Performance Variables:
 ```
@@ -123,14 +126,12 @@ Monitor the **Logs** tab for any runtime errors:
 
 ### 7. Troubleshooting Common Issues
 
-#### Issue: "Could not find Chrome"
+#### Issue: "Could not find Chrome" or "Browser was not found"
 **Solution:**
-1. Verify environment variables are set correctly
-2. Check build logs for Chrome installation
-3. Add this to environment variables:
-   ```
-   PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
-   ```
+1. **Remove** any `PUPPETEER_EXECUTABLE_PATH` or `CHROME_BIN` environment variables
+2. Check build logs for Chrome installation success
+3. Ensure `DEBUG_PUPPETEER=true` to see Chrome detection logs
+4. The app will automatically find Chrome or use Puppeteer's bundled Chromium
 
 #### Issue: "Memory limit exceeded"
 **Solution:**
