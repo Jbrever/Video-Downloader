@@ -275,6 +275,17 @@ app.get('/api/resolve', async (req, res) => {
 
         // Set User Agent to avoid detection
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
+        
+        // Set additional headers to bypass restrictions
+        await page.setExtraHTTPHeaders({
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Accept-Encoding': 'gzip, deflate, br',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,image/apng,*/*;q=0.8',
+            'Upgrade-Insecure-Requests': '1',
+            'Sec-Fetch-Dest': 'document',
+            'Sec-Fetch-Mode': 'navigate',
+            'Sec-Fetch-Site': 'none'
+        });
 
         const foundVideos = new Map(); // Use Map to deduplicate by URL
 
@@ -483,17 +494,93 @@ app.get('/api/download', async (req, res) => {
                 .pipe(res);
 
         } else if (type === 'direct') {
-            // Direct stream pipe
-            const response = await axios({
-                method: 'GET',
-                url: videoUrl,
-                responseType: 'stream'
-            });
+            // Direct stream pipe with proper headers to bypass restrictions
+            // console.log(`Downloading direct video: ${videoUrl}`);
+            console.log(`Downloading direct video...`);
+            try {
+                const response = await axios({
+                    method: 'GET',
+                    url: videoUrl,
+                    responseType: 'stream',
+                    headers: {
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept': 'video/webm,video/ogg,video/*;q=0.9,application/ogg;q=0.7,audio/*;q=0.6,*/*;q=0.5',
+                        'Accept-Language': 'en-US,en;q=0.9',
+                        'Accept-Encoding': 'identity',
+                        'Range': 'bytes=0-',
+                        'Referer': videoUrl.split('/').slice(0, 3).join('/') + '/',
+                        'Origin': videoUrl.split('/').slice(0, 3).join('/'),
+                        'Sec-Fetch-Dest': 'video',
+                        'Sec-Fetch-Mode': 'no-cors',
+                        'Sec-Fetch-Site': 'cross-site'
+                    },
+                    timeout: config.limits.downloadTimeoutMs,
+                    maxRedirects: 5,
+                    validateStatus: (status) => status < 400 || status === 403 || status === 404
+                });
 
-            res.setHeader('Content-Disposition', 'attachment; filename="video.mp4"');
-            res.setHeader('Content-Type', response.headers['content-type'] || 'video/mp4');
+                if (response.status === 403) {
+                    console.log('403 Forbidden - trying alternative headers...');
+                    
+                    // Try with minimal headers
+                    const retryResponse = await axios({
+                        method: 'GET',
+                        url: videoUrl,
+                        responseType: 'stream',
+                        headers: {
+                            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                            'Accept': '*/*',
+                            'Accept-Encoding': 'identity'
+                        },
+                        timeout: config.limits.downloadTimeoutMs,
+                        maxRedirects: 5
+                    });
+                    
+                    if (retryResponse.status >= 400) {
+                        throw new Error(`Video server returned ${retryResponse.status}: Access denied or video not available`);
+                    }
+                    
+                    response.data = retryResponse.data;
+                    response.headers = retryResponse.headers;
+                }
 
-            response.data.pipe(res);
+                // Set download headers
+                const filename = `video_${Date.now()}.mp4`;
+                res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+                res.setHeader('Content-Type', response.headers['content-type'] || 'video/mp4');
+                
+                if (response.headers['content-length']) {
+                    res.setHeader('Content-Length', response.headers['content-length']);
+                }
+
+                // Pipe the video stream
+                response.data.on('error', (streamError) => {
+                    console.error('Stream error:', streamError.message);
+                    if (!res.headersSent) {
+                        res.status(500).send('Video streaming failed. The video may be protected or unavailable.');
+                    }
+                });
+
+                response.data.pipe(res);
+                
+            } catch (error) {
+                console.error('Direct download error:', error.message);
+                
+                let errorMessage = 'Video download failed.';
+                if (error.response?.status === 403) {
+                    errorMessage = 'Access denied: The video is protected and cannot be downloaded directly.';
+                } else if (error.response?.status === 404) {
+                    errorMessage = 'Video not found: The video URL may have expired or been removed.';
+                } else if (error.code === 'ECONNREFUSED') {
+                    errorMessage = 'Connection refused: Cannot connect to the video server.';
+                } else if (error.code === 'ETIMEDOUT') {
+                    errorMessage = 'Download timeout: The video server is not responding.';
+                }
+                
+                if (!res.headersSent) {
+                    res.status(500).send(errorMessage);
+                }
+            }
 
         } else if (type === 'm3u8') {
             // Ensure temp directory exists
@@ -517,38 +604,56 @@ app.get('/api/download', async (req, res) => {
                 // Get the first part of the file to check if it's actually M3U8 content
                 const testResponse = await axios.get(videoUrl, { 
                     timeout: 10000,
-                    headers: { 'Range': 'bytes=0-1023' }, // Just get first 1KB
+                    headers: { 
+                        'Range': 'bytes=0-1023', // Just get first 1KB
+                        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                        'Accept': 'application/x-mpegURL,application/vnd.apple.mpegurl,application/json,text/plain,*/*',
+                        'Referer': videoUrl.split('/').slice(0, 3).join('/') + '/'
+                    },
                     validateStatus: (status) => status < 500
                 });
                 
-                const content = testResponse.data;
-                console.log('M3U8 content preview:', content.substring(0, 200));
-                
-                // Check if it's actually M3U8 content
-                if (typeof content === 'string' && content.includes('#EXTM3U')) {
-                    console.log('Valid M3U8 content detected');
+                if (testResponse.status === 403) {
+                    console.log('M3U8 validation got 403, but proceeding with download attempt...');
+                    // Don't fail here, let FFmpeg try to handle it
                 } else {
-                    console.error('Invalid M3U8 content - does not contain #EXTM3U header');
-                    return res.status(400).send('Invalid M3U8 stream - the file does not contain valid HLS playlist data.');
+                    const content = testResponse.data;
+                    console.log('M3U8 content preview:', content.substring(0, 200));
+                    
+                    // Check if it's actually M3U8 content
+                    if (typeof content === 'string' && content.includes('#EXTM3U')) {
+                        console.log('Valid M3U8 content detected');
+                    } else {
+                        console.error('Invalid M3U8 content - does not contain #EXTM3U header');
+                        return res.status(400).send('Invalid M3U8 stream - the file does not contain valid HLS playlist data.');
+                    }
                 }
                 
             } catch (error) {
                 console.error('M3U8 URL validation failed:', error.message);
-                return res.status(400).send('Invalid M3U8 stream URL. The stream may be expired, inaccessible, or not a valid HLS stream.');
+                if (error.response?.status === 403) {
+                    console.log('M3U8 validation failed with 403, but proceeding with download attempt...');
+                    // Continue with download attempt
+                } else {
+                    return res.status(400).send('Invalid M3U8 stream URL. The stream may be expired, inaccessible, or not a valid HLS stream.');
+                }
             }
 
-            // Enhanced FFmpeg arguments with better error handling
+            // Enhanced FFmpeg arguments with better error handling and headers
             const args = [
                 '-y', // Overwrite output file
+                '-user_agent', 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                '-headers', `Referer: ${videoUrl.split('/').slice(0, 3).join('/')}/\r\nAccept: application/x-mpegURL,application/vnd.apple.mpegurl,*/*\r\n`,
                 '-i', videoUrl, // Input M3U8 URL
                 '-c', 'copy', // Stream copy (no re-encoding)
                 '-bsf:a', 'aac_adtstoasc', // Audio bitstream filter for AAC
                 '-f', 'mp4', // Force MP4 format
                 '-movflags', 'faststart', // Optimize for web playback
-                '-timeout', '60000000', // 1 mint timeout (in microseconds)
+                '-timeout', '60000000', // 1 min timeout (in microseconds)
                 '-reconnect', '1', // Enable reconnection
                 '-reconnect_streamed', '1', // Reconnect for streamed content
                 '-reconnect_delay_max', '5', // Max reconnect delay
+                '-protocol_whitelist', 'file,http,https,tcp,tls,crypto', // Allow protocols
                 tempFilePath
             ];
 
