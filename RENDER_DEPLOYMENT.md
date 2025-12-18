@@ -31,7 +31,7 @@ git push origin main
 
 **Build Command:**
 ```bash
-npm install && npx puppeteer browsers install chrome
+npm install
 ```
 
 **Start Command:**
@@ -46,12 +46,16 @@ In your Render service settings, go to **Environment** section and add these var
 #### Required Environment Variables:
 ```
 NODE_ENV=production
-PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=true
+PUPPETEER_SKIP_CHROMIUM_DOWNLOAD=false
+DEBUG_PUPPETEER=true
+DEBUG_FFMPEG=false
+VERBOSE_LOGGING=true
+```
+
+#### Optional Environment Variables (Chrome paths auto-detected):
+```
 PUPPETEER_EXECUTABLE_PATH=/usr/bin/google-chrome-stable
 CHROME_BIN=/usr/bin/google-chrome-stable
-DEBUG_PUPPETEER=false
-DEBUG_FFMPEG=false
-VERBOSE_LOGGING=false
 ```
 
 #### Optional Performance Variables:
