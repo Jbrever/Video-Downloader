@@ -1,3 +1,6 @@
+// Load environment variables
+require('dotenv').config();
+
 const express = require('express');
 const puppeteer = require('puppeteer');
 const ffmpeg = require('fluent-ffmpeg');
@@ -12,6 +15,45 @@ ffmpeg.setFfmpegPath(ffmpegPath);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+// console.log('-__>',process.env.PUPPETEER_EXECUTABLE_PATH);
+
+// Configuration from environment variables
+const config = {
+    port: PORT,
+    nodeEnv: process.env.NODE_ENV || 'development',
+    puppeteer: {
+        skipDownload: process.env.PUPPETEER_SKIP_CHROMIUM_DOWNLOAD === 'true',
+        executablePath: process.env.PUPPETEER_EXECUTABLE_PATH || process.env.CHROME_BIN,
+        cacheDir: process.env.PUPPETEER_CACHE_DIR,
+        timeout: parseInt(process.env.PUPPETEER_TIMEOUT_MS) || 30000,
+        args: process.env.CHROME_ARGS ? process.env.CHROME_ARGS.split(',') : [
+            '--no-sandbox',
+            '--disable-setuid-sandbox',
+            '--disable-dev-shm-usage',
+            '--disable-accelerated-2d-canvas',
+            '--no-first-run',
+            '--no-zygote',
+            '--single-process',
+            '--disable-gpu',
+            '--disable-web-security',
+            '--disable-features=VizDisplayCompositor'
+        ]
+    },
+    debug: {
+        puppeteer: process.env.DEBUG_PUPPETEER === 'true',
+        ffmpeg: process.env.DEBUG_FFMPEG === 'true',
+        verbose: process.env.VERBOSE_LOGGING === 'true'
+    },
+    limits: {
+        maxVideoSizeMB: parseInt(process.env.MAX_VIDEO_SIZE_MB) || 500,
+        downloadTimeoutMs: parseInt(process.env.DOWNLOAD_TIMEOUT_MS) || 300000
+    }
+};
+
+// Log configuration in development
+if (config.nodeEnv === 'development' && config.debug.verbose) {
+    console.log('Configuration:', JSON.stringify(config, null, 2));
+}
 
 app.use(cors());
 app.use(express.static('public'));
@@ -66,11 +108,25 @@ const ytdl = require('@distube/ytdl-core');
 const getYtdlAgent = async (url) => {
     let browser;
     try {
-        console.log('Launching Puppeteer to fetch YouTube cookies...');
-        browser = await puppeteer.launch({
+        if (config.debug.puppeteer) {
+            console.log('Launching Puppeteer to fetch YouTube cookies...');
+        }
+        
+        // Enhanced launch options from config
+        const launchOptions = {
             headless: 'new',
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
+            args: config.puppeteer.args
+        };
+
+        // Use custom executable path if provided
+        if (config.puppeteer.executablePath) {
+            launchOptions.executablePath = config.puppeteer.executablePath;
+            if (config.debug.puppeteer) {
+                console.log('Using Chrome at:', config.puppeteer.executablePath);
+            }
+        }
+
+        browser = await puppeteer.launch(launchOptions);
         const page = await browser.newPage();
         await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
 
@@ -151,10 +207,25 @@ app.get('/api/resolve', async (req, res) => {
     // PUPPETEER HANDLER (Existing generic logic)
     let browser;
     try {
-        browser = await puppeteer.launch({
+        if (config.debug.puppeteer) {
+            console.log('Launching Puppeteer for page scraping...');
+        }
+        
+        // Enhanced launch options from config
+        const launchOptions = {
             headless: 'new', // Use new headless mode
-            args: ['--no-sandbox', '--disable-setuid-sandbox']
-        });
+            args: config.puppeteer.args
+        };
+
+        // Use custom executable path if provided
+        if (config.puppeteer.executablePath) {
+            launchOptions.executablePath = config.puppeteer.executablePath;
+            if (config.debug.puppeteer) {
+                console.log('Using Chrome at:', config.puppeteer.executablePath);
+            }
+        }
+
+        browser = await puppeteer.launch(launchOptions);
         const page = await browser.newPage();
 
         // Set User Agent to avoid detection
@@ -573,8 +644,14 @@ if (!fs.existsSync(tempDir)) {
     console.log('Created temp directory');
 }
 
-app.listen(PORT, () => {
-    console.log(`Server running on http://localhost:${PORT}`);
-    console.log(`Temp directory: ${tempDir}`);
-    console.log(`FFmpeg path: ${ffmpegPath}`);
+app.listen(config.port, () => {
+    console.log(`🚀 Server running on http://localhost:${config.port}`);
+    console.log(`📁 Temp directory: ${tempDir}`);
+    console.log(`🎬 FFmpeg path: ${ffmpegPath}`);
+    console.log(`🌍 Environment: ${config.nodeEnv}`);
+    
+    if (config.debug.verbose) {
+        console.log(`🔧 Puppeteer executable: ${config.puppeteer.executablePath || 'default'}`);
+        console.log(`⚙️  Chrome args: ${config.puppeteer.args.join(' ')}`);
+    }
 });
