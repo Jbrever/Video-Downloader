@@ -15,7 +15,7 @@ ffmpeg.setFfmpegPath(ffmpegPath);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-// console.log('-__>',process.env.PUPPETEER_EXECUTABLE_PATH);
+console.log('-__>',process.env.PUPPETEER_EXECUTABLE_PATH);
 
 // Configuration from environment variables
 const config = {
@@ -118,12 +118,39 @@ const getYtdlAgent = async (url) => {
             args: config.puppeteer.args
         };
 
-        // Use custom executable path if provided
-        if (config.puppeteer.executablePath) {
-            launchOptions.executablePath = config.puppeteer.executablePath;
-            if (config.debug.puppeteer) {
-                console.log('Using Chrome at:', config.puppeteer.executablePath);
+        // Try to find Chrome executable with multiple fallback paths
+        const chromePaths = [
+            config.puppeteer.executablePath,
+            process.env.PUPPETEER_EXECUTABLE_PATH,
+            process.env.CHROME_BIN,
+            '/usr/bin/google-chrome-stable',
+            '/usr/bin/google-chrome',
+            '/usr/bin/chromium-browser',
+            '/usr/bin/chromium',
+            '/opt/google/chrome/chrome',
+            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+        ].filter(Boolean);
+
+        // Try each Chrome path until we find one that exists
+        let chromeFound = false;
+        for (const chromePath of chromePaths) {
+            try {
+                if (fs.existsSync(chromePath)) {
+                    launchOptions.executablePath = chromePath;
+                    chromeFound = true;
+                    if (config.debug.puppeteer) {
+                        console.log('Found Chrome at:', chromePath);
+                    }
+                    break;
+                }
+            } catch (error) {
+                // Continue to next path
             }
+        }
+
+        // If no Chrome found, let Puppeteer use its bundled Chromium
+        if (!chromeFound && config.debug.puppeteer) {
+            console.log('No system Chrome found, using Puppeteer bundled Chromium');
         }
 
         browser = await puppeteer.launch(launchOptions);
@@ -217,12 +244,39 @@ app.get('/api/resolve', async (req, res) => {
             args: config.puppeteer.args
         };
 
-        // Use custom executable path if provided
-        if (config.puppeteer.executablePath) {
-            launchOptions.executablePath = config.puppeteer.executablePath;
-            if (config.debug.puppeteer) {
-                console.log('Using Chrome at:', config.puppeteer.executablePath);
+        // Try to find Chrome executable with multiple fallback paths
+        const chromePaths = [
+            config.puppeteer.executablePath,
+            process.env.PUPPETEER_EXECUTABLE_PATH,
+            process.env.CHROME_BIN,
+            '/usr/bin/google-chrome-stable',
+            '/usr/bin/google-chrome',
+            '/usr/bin/chromium-browser',
+            '/usr/bin/chromium',
+            '/opt/google/chrome/chrome',
+            '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'
+        ].filter(Boolean);
+
+        // Try each Chrome path until we find one that exists
+        let chromeFound = false;
+        for (const chromePath of chromePaths) {
+            try {
+                if (fs.existsSync(chromePath)) {
+                    launchOptions.executablePath = chromePath;
+                    chromeFound = true;
+                    if (config.debug.puppeteer) {
+                        console.log('Found Chrome at:', chromePath);
+                    }
+                    break;
+                }
+            } catch (error) {
+                // Continue to next path
             }
+        }
+
+        // If no Chrome found, let Puppeteer use its bundled Chromium
+        if (!chromeFound && config.debug.puppeteer) {
+            console.log('No system Chrome found, using Puppeteer bundled Chromium');
         }
 
         browser = await puppeteer.launch(launchOptions);
