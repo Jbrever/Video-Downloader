@@ -25,15 +25,34 @@ const isVideoResource = (url, contentType) => {
     const cleanUrl = url.split('?')[0].toLowerCase();
     const ext = path.extname(cleanUrl);
 
+    // Skip font files and other non-video files
+    if (['.woff', '.woff2', '.ttf', '.eot', '.css', '.js', '.json', '.xml', '.txt'].includes(ext)) {
+        return null;
+    }
+
     // Check extensions
     if (['.mp4', '.webm', '.mkv', '.mov', '.avi'].includes(ext)) return 'direct';
-    if (['.m3u8', '.ts'].includes(ext)) return 'm3u8';
+    
+    // Only consider .m3u8 files as M3U8, not .ts segments or .txt files
+    if (ext === '.m3u8') return 'm3u8';
+    
+    // Skip individual .ts segments - we want the main playlist
+    if (ext === '.ts') return null;
+
+    // Check for HLS patterns in URL even without .m3u8 extension
+    if (cleanUrl.includes('m3u8') || cleanUrl.includes('playlist') || cleanUrl.includes('master')) {
+        // But make sure it's not a .txt file pretending to be HLS
+        if (ext === '.txt') return null;
+        return 'm3u8';
+    }
 
     // Check Content-Type if extension is ambiguous or missing
     if (contentType) {
         contentType = contentType.toLowerCase();
         if (contentType.includes('video/mp4') || contentType.includes('video/webm') || contentType.includes('video/ogg')) return 'direct';
-        if (contentType.includes('application/x-mpegurl') || contentType.includes('application/vnd.apple.mpegurl') || contentType.includes('video/mp2t')) return 'm3u8';
+        if (contentType.includes('application/x-mpegurl') || contentType.includes('application/vnd.apple.mpegurl')) return 'm3u8';
+        // Skip font content types and text files
+        if (contentType.includes('font') || contentType.includes('woff') || contentType.includes('text/plain')) return null;
         // Fallback: If content-type starts with video/ but isn't an image/font
         if (contentType.startsWith('video/') && !contentType.includes('html')) return 'direct';
     }
@@ -122,7 +141,10 @@ app.get('/api/resolve', async (req, res) => {
 
         } catch (error) {
             console.error('YouTube error:', error);
-            return res.status(500).json({ error: 'Failed to process YouTube video: ' + error.message });
+            let msg = 'Failed to process YouTube video.';
+            if (error.message.includes('410')) msg = 'Video is age-restricted or private/deleted.';
+            if (error.message.includes('429')) msg = 'Too many requests. Please try again later.';
+            return res.status(500).json({ error: msg });
         }
     }
 
@@ -180,16 +202,40 @@ app.get('/api/resolve', async (req, res) => {
                     }
                 }
 
-                foundVideos.set(url, {
-                    videoUrl: url,
-                    type: type,
-                    contentType: contentType,
-                    size: contentLength ? (parseInt(contentLength) / 1024 / 1024).toFixed(2) + ' MB' : 'Unknown'
-                });
+                // For M3U8, try to find the master playlist by looking for common patterns
+                if (type === 'm3u8') {
+                    // Look for master playlist indicators
+                    const urlLower = url.toLowerCase();
+                    if (urlLower.includes('master') || urlLower.includes('playlist') || urlLower.includes('index')) {
+                        // This is likely a master playlist
+                        foundVideos.set(url, {
+                            videoUrl: url,
+                            type: type,
+                            contentType: contentType,
+                            size: 'HLS Stream',
+                            quality: 'Adaptive'
+                        });
+                    } else {
+                        // Regular M3U8 file
+                        foundVideos.set(url, {
+                            videoUrl: url,
+                            type: type,
+                            contentType: contentType,
+                            size: 'HLS Stream'
+                        });
+                    }
+                } else {
+                    foundVideos.set(url, {
+                        videoUrl: url,
+                        type: type,
+                        contentType: contentType,
+                        size: contentLength ? (parseInt(contentLength) / 1024 / 1024).toFixed(2) + ' MB' : 'Unknown'
+                    });
+                }
             }
         });
 
-        console.log(`Navigating to ${targetUrl}...`);
+        // console.log(`Navigating to ${targetUrl}...`);
         try {
             await page.goto(targetUrl, { waitUntil: 'networkidle2', timeout: 30000 });
         } catch (e) {
@@ -228,12 +274,63 @@ app.get('/api/resolve', async (req, res) => {
             console.log(`Found ${videos.length} videos`);
             res.json({ videos });
         } else {
-            res.status(404).json({ error: 'No video found on this page' });
+            // Try to find HLS streams by looking for common video player patterns
+            try {
+                const hlsUrls = await page.evaluate(() => {
+                    const urls = [];
+                    
+                    // Look for video elements with src
+                    const videos = document.querySelectorAll('video');
+                    videos.forEach(video => {
+                        if (video.src && (video.src.includes('.m3u8') || video.src.includes('hls'))) {
+                            urls.push(video.src);
+                        }
+                    });
+                    
+                    // Look for source elements
+                    const sources = document.querySelectorAll('source');
+                    sources.forEach(source => {
+                        if (source.src && (source.src.includes('.m3u8') || source.src.includes('hls'))) {
+                            urls.push(source.src);
+                        }
+                    });
+                    
+                    // Look in script tags for HLS URLs
+                    const scripts = document.querySelectorAll('script');
+                    scripts.forEach(script => {
+                        if (script.textContent) {
+                            const m3u8Matches = script.textContent.match(/https?:\/\/[^\s"']+\.m3u8[^\s"']*/g);
+                            if (m3u8Matches) {
+                                urls.push(...m3u8Matches);
+                            }
+                        }
+                    });
+                    
+                    return [...new Set(urls)]; // Remove duplicates
+                });
+                
+                if (hlsUrls.length > 0) {
+                    const videos = hlsUrls.map((url, index) => ({
+                        videoUrl: url,
+                        type: 'm3u8',
+                        contentType: 'application/x-mpegurl',
+                        size: 'HLS Stream',
+                        thumbnail: pageThumbnail || 'https://via.placeholder.com/150?text=No+Preview'
+                    }));
+                    console.log(`Found ${videos.length} HLS streams in page content`);
+                    res.json({ videos });
+                } else {
+                    res.status(404).json({ error: 'No downloadable video found on this page. It might be encrypted (DRM) or unsupported.' });
+                }
+            } catch (e) {
+                console.error('Error searching for HLS URLs:', e);
+                res.status(404).json({ error: 'No downloadable video found on this page. It might be encrypted (DRM) or unsupported.' });
+            }
         }
 
     } catch (error) {
         console.error('Scraping error:', error);
-        res.status(500).json({ error: error.message || 'Failed to resolve video' });
+        res.status(500).json({ error: 'Failed to analyze page: ' + (error.message || 'Unknown error') });
     } finally {
         if (browser) await browser.close();
     }
@@ -265,7 +362,7 @@ app.get('/api/download', async (req, res) => {
             ytdl(realUrl, { quality: itag, agent })
                 .on('error', (err) => {
                     console.error('YTDL error:', err);
-                    if (!res.headersSent) res.status(500).send('Download failed: ' + err.message);
+                    if (!res.headersSent) res.status(500).send('Download failed. The video might be restricted.');
                 })
                 .pipe(res);
 
@@ -283,61 +380,180 @@ app.get('/api/download', async (req, res) => {
             response.data.pipe(res);
 
         } else if (type === 'm3u8') {
+            // Ensure temp directory exists
+            const tempDir = path.join(__dirname, 'temp');
+            if (!fs.existsSync(tempDir)) {
+                fs.mkdirSync(tempDir, { recursive: true });
+            }
+
             // Download to temp file using spawn directly
             const tempFileName = `video-${Date.now()}.mp4`;
-            const tempFilePath = path.join(__dirname, 'temp', tempFileName);
+            const tempFilePath = path.join(tempDir, tempFileName);
             const { spawn } = require('child_process');
 
-            console.log(`Starting transcoding to ${tempFilePath}...`);
+            console.log(`Starting M3U8 transcoding from: ${videoUrl}`);
+            console.log(`Output file: ${tempFilePath}`);
 
-            // Arguments for ffmpeg-static
-            // -y: overwrite
-            // -i: input
-            // -c: copy (stream copy)
-            // -bsf:a: audio bitstream filter
+            // Validate the M3U8 URL and check if it's actually a valid playlist
+            try {
+                console.log('Validating M3U8 URL:', videoUrl);
+                
+                // Get the first part of the file to check if it's actually M3U8 content
+                const testResponse = await axios.get(videoUrl, { 
+                    timeout: 10000,
+                    headers: { 'Range': 'bytes=0-1023' }, // Just get first 1KB
+                    validateStatus: (status) => status < 500
+                });
+                
+                const content = testResponse.data;
+                console.log('M3U8 content preview:', content.substring(0, 200));
+                
+                // Check if it's actually M3U8 content
+                if (typeof content === 'string' && content.includes('#EXTM3U')) {
+                    console.log('Valid M3U8 content detected');
+                } else {
+                    console.error('Invalid M3U8 content - does not contain #EXTM3U header');
+                    return res.status(400).send('Invalid M3U8 stream - the file does not contain valid HLS playlist data.');
+                }
+                
+            } catch (error) {
+                console.error('M3U8 URL validation failed:', error.message);
+                return res.status(400).send('Invalid M3U8 stream URL. The stream may be expired, inaccessible, or not a valid HLS stream.');
+            }
+
+            // Enhanced FFmpeg arguments with better error handling
             const args = [
-                '-y',
-                '-i', videoUrl,
-                '-c', 'copy',
-                '-bsf:a', 'aac_adtstoasc',
+                '-y', // Overwrite output file
+                '-i', videoUrl, // Input M3U8 URL
+                '-c', 'copy', // Stream copy (no re-encoding)
+                '-bsf:a', 'aac_adtstoasc', // Audio bitstream filter for AAC
+                '-f', 'mp4', // Force MP4 format
+                '-movflags', 'faststart', // Optimize for web playback
+                '-timeout', '60000000', // 1 mint timeout (in microseconds)
+                '-reconnect', '1', // Enable reconnection
+                '-reconnect_streamed', '1', // Reconnect for streamed content
+                '-reconnect_delay_max', '5', // Max reconnect delay
                 tempFilePath
             ];
 
-            const ffmpegProcess = spawn(ffmpegPath, args);
+            console.log('FFmpeg command:', ffmpegPath, args.join(' '));
 
-            let stderr = '';
-            ffmpegProcess.stderr.on('data', (data) => {
-                stderr += data.toString();
+            const ffmpegProcess = spawn(ffmpegPath, args, {
+                stdio: ['pipe', 'pipe', 'pipe']
             });
 
-            ffmpegProcess.on('close', (code) => {
+            let stderr = '';
+            let stdout = '';
+
+            ffmpegProcess.stdout.on('data', (data) => {
+                stdout += data.toString();
+            });
+
+            ffmpegProcess.stderr.on('data', (data) => {
+                const chunk = data.toString();
+                stderr += chunk;
+                // Log progress for debugging
+                if (chunk.includes('time=') || chunk.includes('frame=')) {
+                    console.log('FFmpeg progress:', chunk.trim());
+                }
+            });
+
+            // Set a timeout for the entire process
+            const processTimeout = setTimeout(() => {
+                console.log('FFmpeg process timeout - killing process');
+                ffmpegProcess.kill('SIGKILL');
+            }, 300000); // 5 minutes timeout
+
+            ffmpegProcess.on('close', (code, signal) => {
+                clearTimeout(processTimeout);
+                
+                console.log(`FFmpeg process closed with code: ${code}, signal: ${signal}`);
+                
                 if (code === 0) {
                     console.log('FFmpeg transcoding finished successfully');
-                    // Allow browser to download
-                    res.download(tempFilePath, 'video.mp4', (err) => {
-                        if (err) {
-                            console.error('Download sending error:', err);
+                    
+                    // Check if file exists and has content
+                    if (fs.existsSync(tempFilePath)) {
+                        const stats = fs.statSync(tempFilePath);
+                        if (stats.size > 1024) { // At least 1KB
+                            console.log(`Output file size: ${(stats.size / 1024 / 1024).toFixed(2)} MB`);
+                            
+                            // Set proper headers for download
+                            res.setHeader('Content-Disposition', 'attachment; filename="video.mp4"');
+                            res.setHeader('Content-Type', 'video/mp4');
+                            res.setHeader('Content-Length', stats.size);
+                            
+                            // Stream the file to the client
+                            const fileStream = fs.createReadStream(tempFilePath);
+                            fileStream.pipe(res);
+                            
+                            // Clean up after streaming is complete
+                            fileStream.on('end', () => {
+                                console.log('File streaming completed');
+                                setTimeout(() => {
+                                    fs.unlink(tempFilePath, (unlinkErr) => {
+                                        if (unlinkErr) console.error('Cleanup error:', unlinkErr);
+                                        else console.log('Temp file cleaned up');
+                                    });
+                                }, 2000);
+                            });
+                            
+                            fileStream.on('error', (streamErr) => {
+                                console.error('File streaming error:', streamErr);
+                                if (!res.headersSent) {
+                                    res.status(500).send('Error streaming video file.');
+                                }
+                            });
+                            
+                        } else {
+                            console.error('Output file is too small:', stats.size, 'bytes');
+                            fs.unlinkSync(tempFilePath);
+                            if (!res.headersSent) {
+                                res.status(500).send('Video conversion produced invalid file. The stream may be corrupted or empty.');
+                            }
                         }
-                        // Clean up
-                        fs.unlink(tempFilePath, () => { });
-                    });
+                    } else {
+                        console.error('Output file does not exist');
+                        if (!res.headersSent) {
+                            res.status(500).send('Video conversion failed to create output file.');
+                        }
+                    }
                 } else {
-                    console.error('FFmpeg process exited with code:', code);
+                    console.error(`FFmpeg process failed with code: ${code}, signal: ${signal}`);
                     console.error('FFmpeg stderr:', stderr);
+                    
                     // Clean up temp file if exists
                     if (fs.existsSync(tempFilePath)) {
                         fs.unlinkSync(tempFilePath);
                     }
+                    
                     if (!res.headersSent) {
-                        res.status(500).send('Conversion failed with code ' + code);
+                        let errorMessage = 'Video conversion failed.';
+                        
+                        if (stderr.includes('Connection refused') || stderr.includes('Network is unreachable')) {
+                            errorMessage = 'Cannot connect to video stream. The stream may be offline or blocked.';
+                        } else if (stderr.includes('403') || stderr.includes('Forbidden')) {
+                            errorMessage = 'Access denied to video stream. The stream may require authentication.';
+                        } else if (stderr.includes('404') || stderr.includes('Not Found')) {
+                            errorMessage = 'Video stream not found. The stream may have expired.';
+                        } else if (stderr.includes('timeout') || stderr.includes('timed out')) {
+                            errorMessage = 'Video stream timeout. The stream may be too slow or unstable.';
+                        } else if (code === null || signal === 'SIGKILL') {
+                            errorMessage = 'Video conversion was interrupted. The stream may be too large or corrupted.';
+                        }
+                        
+                        res.status(500).send(errorMessage);
                     }
                 }
             });
 
             // Handle error on spawn itself
             ffmpegProcess.on('error', (err) => {
+                clearTimeout(processTimeout);
                 console.error('Failed to start FFmpeg process:', err);
-                if (!res.headersSent) res.status(500).send('Failed to start conversion');
+                if (!res.headersSent) {
+                    res.status(500).send('Failed to start video conversion process.');
+                }
             });
 
         } else {
@@ -350,6 +566,15 @@ app.get('/api/download', async (req, res) => {
     }
 });
 
+// Ensure temp directory exists
+const tempDir = path.join(__dirname, 'temp');
+if (!fs.existsSync(tempDir)) {
+    fs.mkdirSync(tempDir, { recursive: true });
+    console.log('Created temp directory');
+}
+
 app.listen(PORT, () => {
     console.log(`Server running on http://localhost:${PORT}`);
+    console.log(`Temp directory: ${tempDir}`);
+    console.log(`FFmpeg path: ${ffmpegPath}`);
 });

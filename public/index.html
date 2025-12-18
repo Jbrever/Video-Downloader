@@ -1,219 +1,852 @@
 <!DOCTYPE html>
 <html lang="en">
-
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Video Scraper & Downloader</title>
     <script src="https://cdn.tailwindcss.com"></script>
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
     <style>
-        body {
-            font-family: 'Inter', sans-serif;
+      body {
+        font-family: "Inter", sans-serif;
+      }
+      
+      /* Ensure thumbnails load properly */
+      .video-thumbnail {
+        background-color: #374151;
+        border: 1px solid #4B5563;
+        object-fit: cover;
+        transition: all 0.3s ease;
+      }
+      
+      .video-thumbnail:hover {
+        transform: scale(1.05);
+      }
+      
+      /* Mobile responsive adjustments */
+      @media (max-width: 640px) {
+        .video-item {
+          flex-direction: column;
+          text-align: center;
         }
+        
+        .video-item .video-thumbnail {
+          width: 100%;
+          max-width: 200px;
+          height: 120px;
+          margin: 0 auto 12px auto;
+        }
+        
+        .video-info {
+          width: 100%;
+          margin-bottom: 12px;
+        }
+        
+        .video-button {
+          width: 100%;
+          justify-content: center;
+        }
+        
+        .single-video-item {
+          padding: 16px;
+        }
+        
+        .single-video-button {
+          width: 100%;
+          padding: 12px 24px;
+        }
+      }
+      
+      /* Ensure proper image loading */
+      img[src=""], img:not([src]) {
+        opacity: 0;
+      }
+      
+      img {
+        opacity: 1;
+        transition: opacity 0.3s ease;
+      }
     </style>
-</head>
+  </head>
 
-<body class="bg-gray-900 text-gray-100 min-h-screen flex flex-col items-center justify-center p-4">
+  <body
+    class="bg-gray-900 text-gray-100 min-h-screen flex flex-col items-center justify-center p-2 sm:p-4"
+  >
+    <div
+      class="w-full max-w-lg bg-gray-800 rounded-xl shadow-2xl overflow-hidden border border-gray-700"
+    >
+      <!-- Header -->
+      <div class="bg-gradient-to-r from-blue-600 to-indigo-600 p-4 sm:p-6 text-center">
+        <h1 class="text-2xl sm:text-3xl font-bold text-white mb-2">Video Scraper</h1>
+        <p class="text-blue-100 text-xs sm:text-sm">Download videos from almost any URL</p>
+      </div>
 
-    <div class="w-full max-w-lg bg-gray-800 rounded-xl shadow-2xl overflow-hidden border border-gray-700">
-        <!-- Header -->
-        <div class="bg-gradient-to-r from-blue-600 to-indigo-600 p-6 text-center">
-            <h1 class="text-3xl font-bold text-white mb-2">Video Scraper</h1>
-            <p class="text-blue-100 text-sm">Download videos from almost any URL</p>
-        </div>
+      <!-- Content -->
+      <div class="p-4 sm:p-8">
+        <form id="downloadForm" class="space-y-6">
+          <div>
+            <label
+              for="url"
+              class="block text-sm font-medium text-gray-300 mb-2"
+              >Page URL</label
+            >
+            <div class="relative">
+              <input
+                type="url"
+                id="url"
+                name="url"
+                required
+                placeholder="https://example.com/video-page"
+                class="w-full bg-gray-700 border border-gray-600 text-white rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition placeholder-gray-500"
+              />
+            </div>
+          </div>
 
-        <!-- Content -->
-        <div class="p-8">
-            <form id="downloadForm" class="space-y-6">
-                <div>
-                    <label for="url" class="block text-sm font-medium text-gray-300 mb-2">Page URL</label>
-                    <div class="relative">
-                        <input type="url" id="url" name="url" required placeholder="https://example.com/video-page"
-                            class="w-full bg-gray-700 border border-gray-600 text-white rounded-lg px-4 py-3 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent transition placeholder-gray-500">
-                    </div>
-                </div>
+          <div id="statusArea" class="hidden rounded-lg p-4">
+            <div class="flex items-center space-x-3">
+              <div id="statusIcon"></div>
+              <div>
+                <p id="statusTitle" class="font-semibold"></p>
+                <p id="statusMessage" class="text-sm opacity-90"></p>
+              </div>
+            </div>
+            <!-- Progress bar for "Downloading" state if we can capture progress, for now valid only implies detection -->
+            <div
+              id="loader"
+              class="hidden mt-3 h-1 w-full bg-blue-200 rounded-full overflow-hidden"
+            >
+              <div
+                class="animate-pulse bg-blue-500 h-full w-full rounded-full"
+              ></div>
+            </div>
+          </div>
 
-                <div id="statusArea" class="hidden rounded-lg p-4">
-                    <div class="flex items-center space-x-3">
-                        <div id="statusIcon"></div>
-                        <div>
-                            <p id="statusTitle" class="font-semibold"></p>
-                            <p id="statusMessage" class="text-sm opacity-90"></p>
-                        </div>
-                    </div>
-                    <!-- Progress bar for "Downloading" state if we can capture progress, for now valid only implies detection -->
-                    <div id="loader" class="hidden mt-3 h-1 w-full bg-blue-200 rounded-full overflow-hidden">
-                        <div class="animate-pulse bg-blue-500 h-full w-full rounded-full"></div>
-                    </div>
-                </div>
+          <div
+            id="bufferStatus"
+            class="hidden rounded-lg p-4 bg-yellow-900/40 border border-yellow-700"
+          >
+            <div class="flex items-center space-x-3 text-yellow-300">
+              <div
+                class="animate-spin rounded-full h-5 w-5 border-b-2 border-current"
+              ></div>
+              <div>
+                <p class="font-semibold">Processing Video...</p>
+                <p class="text-sm opacity-90">
+                  Your download will start shortly.
+                </p>
+              </div>
+            </div>
+          </div>
 
-                <button type="submit" id="submitBtn"
-                    class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition transform hover:scale-[1.02] active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800 disabled:opacity-50 disabled:cursor-not-allowed">
-                    Download Video
-                </button>
-            </form>
-        </div>
+          <button
+            type="submit"
+            id="submitBtn"
+            class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 px-6 rounded-lg transition transform hover:scale-[1.02] active:scale-[0.98] focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-gray-800 disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            Download Video
+          </button>
+        </form>
+      </div>
 
-        <!-- Footer -->
-        <div class="bg-gray-900/50 p-4 text-center border-t border-gray-700">
-            <p class="text-xs text-gray-500">Supported formats: MP4, WebM, M3U8 (Converted)</p>
-        </div>
+      <!-- Footer -->
+      <div class="bg-gray-900/50 p-4 text-center border-t border-gray-700">
+        <p class="text-xs text-gray-500">
+          Supported formats: MP4, WebM, M3U8 (Converted)
+        </p>
+      </div>
     </div>
 
     <script>
-        const form = document.getElementById('downloadForm');
-        const submitBtn = document.getElementById('submitBtn');
-        const statusArea = document.getElementById('statusArea');
-        const statusTitle = document.getElementById('statusTitle');
-        const statusMessage = document.getElementById('statusMessage');
-        const loader = document.getElementById('loader');
+      const form = document.getElementById("downloadForm");
+      const submitBtn = document.getElementById("submitBtn");
+      const statusArea = document.getElementById("statusArea");
+      const statusTitle = document.getElementById("statusTitle");
+      const statusMessage = document.getElementById("statusMessage");
+      const loader = document.getElementById("loader");
 
-        form.addEventListener('submit', async (e) => {
-            e.preventDefault();
-            const url = document.getElementById('url').value;
+      // Download Detection System
+      const DownloadDetector = {
+        isActive: false,
+        startTime: null,
+        method: null,
+        url: null,
+        callbacks: [],
 
-            // Reset state
-            const resultsList = document.getElementById('resultsList');
-            if (resultsList) resultsList.remove();
+        // Add callback for download start events
+        onDownloadStart(callback) {
+          this.callbacks.push(callback);
+        },
 
-            setUIState('loading', 'Searching for video...', 'Launching browser to detect media resources. This may take up to 30 seconds.');
-
+        // Trigger download start event
+        triggerDownloadStart(method, url) {
+          if (this.isActive) return; // Prevent duplicate triggers
+          
+          this.isActive = true;
+          this.startTime = Date.now();
+          this.method = method;
+          this.url = url;
+          
+          console.log(`Download detected via ${method}: ${url}`);
+          
+          // Notify all callbacks
+          this.callbacks.forEach(callback => {
             try {
-                // Step 1: Resolve the video URL
-                const response = await fetch(`/api/resolve?url=${encodeURIComponent(url)}`);
-                const data = await response.json();
-
-                if (!response.ok) {
-                    throw new Error(data.error || 'Failed to resolve video');
-                }
-
-                const videos = data.videos || [];
-
-                if (videos.length === 0) {
-                    throw new Error('No videos returned');
-                } else if (videos.length === 1) {
-                    // Single video found - Direct download
-                    startDownload(videos[0]);
-                } else {
-                    // Multiple videos found - Show list
-                    setUIState('success', 'Multiple Videos Found', `Found ${videos.length} videos. Please select one to download.`);
-                    renderVideoList(videos);
-                }
-
+              callback(method, url);
             } catch (error) {
-                setUIState('error', 'Error', error.message);
+              console.error('Download callback error:', error);
             }
+          });
+        },
+
+        // Reset detection state
+        reset() {
+          this.isActive = false;
+          this.startTime = null;
+          this.method = null;
+          this.url = null;
+        },
+
+        // Method 1: Monitor window location changes for download URLs
+        setupNavigationDetection() {
+          const originalLocation = window.location.href;
+          
+          // Monitor for navigation to download URLs
+          const checkNavigation = () => {
+            if (window.location.href !== originalLocation && 
+                window.location.href.includes('/api/download')) {
+              this.triggerDownloadStart('navigation', window.location.href);
+            }
+          };
+          
+          // Check periodically for navigation changes
+          setInterval(checkNavigation, 100);
+        },
+
+        // Method 2: Create hidden iframe and monitor its load events
+        createDownloadFrame(url) {
+          const iframe = document.createElement('iframe');
+          iframe.style.display = 'none';
+          
+          let hasTriggered = false;
+          let downloadStarted = false;
+          
+          const triggerSuccess = () => {
+            if (!hasTriggered) {
+              hasTriggered = true;
+              downloadStarted = true;
+              this.triggerDownloadStart('iframe', url);
+              
+              // Show success message only when download actually starts
+              setUIState("success", "Download Started!", "Your video download has begun. Check your downloads folder.", { persistent: true });
+              
+              setTimeout(() => {
+                if (document.body.contains(iframe)) {
+                  document.body.removeChild(iframe);
+                }
+              }, 1000);
+            }
+          };
+          
+          const triggerError = (errorMsg) => {
+            if (!hasTriggered) {
+              hasTriggered = true;
+              console.error('Download failed:', errorMsg);
+              setUIState("error", "Download Failed", errorMsg);
+              
+              if (document.body.contains(iframe)) {
+                document.body.removeChild(iframe);
+              }
+            }
+          };
+          
+          iframe.onload = () => {
+            console.log('Iframe loaded - checking for download');
+            // For successful downloads, the iframe should load quickly
+            setTimeout(() => {
+              if (!downloadStarted) {
+                triggerSuccess();
+              }
+            }, 1000);
+          };
+          
+          iframe.onerror = () => {
+            console.log('Iframe error - download may have failed');
+            triggerError('Download request failed. Please try again.');
+          };
+          
+          // Longer timeout for error detection
+          setTimeout(() => {
+            if (!hasTriggered) {
+              console.log('Iframe timeout - download may have failed');
+              triggerError('Download timeout. The video may be too large or the server is slow.');
+            }
+          }, 15000); // 15 second timeout
+          
+          document.body.appendChild(iframe);
+          iframe.src = url;
+          
+          return iframe;
+        },
+
+        // Method 3: Fallback timer-based detection
+        setupFallbackDetection(url, delay = 2000) {
+          setTimeout(() => {
+            if (!this.isActive) {
+              this.triggerDownloadStart('fallback', url);
+            }
+          }, delay);
+        },
+
+        // Initialize all detection methods
+        init() {
+          this.setupNavigationDetection();
+          console.log('Download detection system initialized');
+        }
+      };
+
+      // Download State Management
+      const DownloadState = {
+        currentPhase: 'idle', // idle, searching, found, processing, downloading, complete
+        messages: {
+          searching: { visible: false, title: '', content: '' },
+          processing: { visible: false, title: '', content: '' },
+          status: { visible: false, title: '', content: '', type: '' }
+        },
+        button: {
+          enabled: true,
+          text: 'Download Video'
+        },
+        downloadInProgress: false,
+        lastSearchResults: null,
+
+        // Update current phase
+        setPhase(newPhase) {
+          console.log(`State transition: ${this.currentPhase} -> ${newPhase}`);
+          this.currentPhase = newPhase;
+          this.validateState();
+        },
+
+        // Update message state
+        setMessage(type, visible, title = '', content = '', messageType = '') {
+          if (this.messages[type]) {
+            this.messages[type] = { visible, title, content, type: messageType };
+          }
+        },
+
+        // Update button state
+        setButton(enabled, text = 'Download Video') {
+          this.button.enabled = enabled;
+          this.button.text = text;
+          this.applyButtonState();
+        },
+
+        // Apply button state to DOM
+        applyButtonState() {
+          submitBtn.disabled = !this.button.enabled;
+          submitBtn.innerText = this.button.text;
+        },
+
+        // Validate state consistency
+        validateState() {
+          // Ensure state consistency
+          if (this.currentPhase === 'downloading' && !this.downloadInProgress) {
+            console.warn('State inconsistency: downloading phase but downloadInProgress is false');
+          }
+          
+          if (this.downloadInProgress && this.button.enabled) {
+            console.warn('State inconsistency: download in progress but button is enabled');
+          }
+        },
+
+        // Reset to initial state
+        reset() {
+          this.currentPhase = 'idle';
+          this.messages = {
+            searching: { visible: false, title: '', content: '' },
+            processing: { visible: false, title: '', content: '' },
+            status: { visible: false, title: '', content: '', type: '' }
+          };
+          this.button = { enabled: true, text: 'Download Video' };
+          this.downloadInProgress = false;
+          this.lastSearchResults = null;
+          this.applyButtonState();
+        },
+
+        // Handle download start
+        onDownloadStart() {
+          console.log('DownloadState: Download started - hiding processing message and re-enabling button');
+          this.downloadInProgress = true;
+          this.setPhase('downloading');
+          this.setMessage('processing', false); // Hide processing message
+          
+          // Hide processing message in UI
+          const bufferStatus = document.getElementById("bufferStatus");
+          if (bufferStatus) {
+            bufferStatus.classList.add("hidden");
+            console.log('DownloadState: Processing message hidden');
+          }
+          
+          // Don't show success message immediately - wait for actual download
+          // Just hide processing and re-enable button
+          this.setButton(true, 'Download Video'); // Re-enable button for next download
+          console.log('DownloadState: Button re-enabled for next download');
+        },
+
+        // Handle download complete
+        onDownloadComplete() {
+          this.downloadInProgress = false;
+          this.setPhase('complete');
+        }
+      };
+
+      // Initialize download detection
+      DownloadDetector.init();
+
+      // Connect download detection to state management
+      DownloadDetector.onDownloadStart((method, url) => {
+        DownloadState.onDownloadStart();
+        
+        // Reset download detector for next download
+        setTimeout(() => {
+          DownloadDetector.reset();
+        }, 1000);
+      });
+
+      form.addEventListener("submit", async (e) => {
+        e.preventDefault();
+        console.log('Form submit triggered');
+        const url = document.getElementById("url").value;
+        console.log('URL from form:', url);
+
+        // Reset state for new download
+        DownloadState.reset();
+        DownloadDetector.reset();
+        
+        const resultsList = document.getElementById("resultsList");
+        if (resultsList) resultsList.remove();
+
+        setUIState(
+          "loading",
+          "Searching for video...",
+          "Launching browser to detect media resources. This may take up to 30 seconds."
+        );
+
+        try {
+          // Step 1: Resolve the video URL
+          const response = await fetch(
+            `/api/resolve?url=${encodeURIComponent(url)}`
+          );
+          const data = await response.json();
+
+          if (!response.ok) {
+            throw new Error(data.error || "Failed to resolve video");
+          }
+
+          const videos = data.videos || [];
+
+          if (videos.length === 0) {
+            throw new Error("No videos returned");
+          } else if (videos.length === 1) {
+            // Single video found - Show in list format for user confirmation
+            setUIState(
+              "success",
+              "Video Found",
+              "Found 1 video. Click download to save it to your device.",
+              { hideSearching: true }
+            );
+            renderVideoList(videos);
+          } else {
+            // Multiple videos found - Hide searching message and show list
+            setUIState(
+              "success",
+              "Multiple Videos Found",
+              `Found ${videos.length} videos. Please select one to download.`,
+              { hideSearching: true }
+            );
+            renderVideoList(videos);
+          }
+        } catch (error) {
+          setUIState("error", "Error", error.message);
+        }
+      });
+
+      function startDownload(videoData) {
+        console.log('startDownload called with:', videoData);
+        
+        // Reset download detector for this new download
+        DownloadDetector.reset();
+        
+        // Show buffering status
+        const bufferStatus = document.getElementById("bufferStatus");
+        if (bufferStatus) {
+          bufferStatus.classList.remove("hidden");
+          console.log('Processing message shown');
+          // Scroll to it if needed
+          bufferStatus.scrollIntoView({ behavior: "smooth", block: "nearest" });
+        }
+
+        // Prepare download URL
+        const downloadUrl = `/api/download?videoUrl=${encodeURIComponent(
+          videoData.videoUrl
+        )}&type=${videoData.type}`;
+        
+        console.log('Download URL prepared:', downloadUrl);
+
+        // Set up error handling timeout
+        const errorTimeout = setTimeout(() => {
+          if (!DownloadDetector.isActive) {
+            console.log('Download timeout - showing error message');
+            const bufferStatus = document.getElementById("bufferStatus");
+            if (bufferStatus) {
+              bufferStatus.classList.add("hidden");
+            }
+            setUIState("error", "Download Failed", "The download could not be started. Please try again or check if the video is still available.");
+          }
+        }, 10000); // 10 second timeout
+
+        // Set up download detection with multiple methods
+        DownloadDetector.setupFallbackDetection(downloadUrl, 3000);
+        
+        // Use iframe method for better detection
+        try {
+          DownloadDetector.createDownloadFrame(downloadUrl);
+        } catch (error) {
+          console.error('Iframe creation failed:', error);
+        }
+        
+        // Fallback: Also use window.location as backup
+        setTimeout(() => {
+          if (!DownloadDetector.isActive) {
+            console.log('Using window.location fallback');
+            window.location.href = downloadUrl;
+          }
+        }, 1500);
+
+        // Clear error timeout if download starts
+        DownloadDetector.onDownloadStart(() => {
+          clearTimeout(errorTimeout);
+        });
+      }
+
+      function renderVideoList(videos) {
+        // Check if list already exists (to prevent duplicates if re-rendering)
+        let listContainer = document.getElementById("resultsList");
+        if (listContainer) listContainer.remove();
+
+        listContainer = document.createElement("div");
+        listContainer.id = "resultsList";
+        listContainer.className =
+          "mt-4 sm:mt-6 bg-gray-800 rounded-lg p-3 sm:p-4 border border-gray-700 space-y-3";
+
+        const bufferStatus = document.getElementById("bufferStatus");
+
+        videos.forEach((video, index) => {
+          const item = document.createElement("div");
+          
+          // Make single video more prominent with responsive classes
+          if (videos.length === 1) {
+            item.className =
+              "video-item single-video-item flex flex-col sm:flex-row items-center gap-3 sm:gap-4 bg-gradient-to-r from-blue-900/30 to-indigo-900/30 p-3 sm:p-4 rounded-lg border border-blue-700/50 hover:from-blue-900/40 hover:to-indigo-900/40 transition";
+          } else {
+            item.className =
+              "video-item flex flex-col sm:flex-row items-center gap-3 sm:gap-4 bg-gray-700 p-3 rounded hover:bg-gray-600 transition";
+          }
+
+          // Thumbnail - responsive sizing
+          const img = document.createElement("img");
+          
+          // Better thumbnail handling
+          const thumbnailUrl = video.thumbnail && video.thumbnail !== 'https://via.placeholder.com/150?text=No+Preview' 
+            ? video.thumbnail 
+            : `https://via.placeholder.com/200x120/374151/9CA3AF?text=${encodeURIComponent(video.type.toUpperCase() + ' Video')}`;
+          
+          img.src = thumbnailUrl;
+          
+          if (videos.length === 1) {
+            img.className = "video-thumbnail w-full sm:w-32 h-24 sm:h-20 object-cover rounded bg-gray-800 border border-gray-600 flex-shrink-0";
+          } else {
+            img.className = "video-thumbnail w-full sm:w-24 h-20 sm:h-16 object-cover rounded bg-gray-800 flex-shrink-0";
+          }
+          
+          // Better error handling for thumbnails
+          img.onerror = () => {
+            img.src = `https://via.placeholder.com/200x120/374151/9CA3AF?text=${encodeURIComponent(video.type.toUpperCase())}`;
+          };
+          
+          // Add loading attribute for better performance
+          img.loading = "lazy";
+          img.alt = `${video.type} video thumbnail`;
+
+          const info = document.createElement("div");
+          info.className = "video-info text-sm text-gray-200 overflow-hidden flex-1 text-center sm:text-left";
+          
+          // Enhanced info for single video with mobile responsiveness
+          if (videos.length === 1) {
+            const shortUrl = video.videoUrl.length > 40 ? video.videoUrl.substring(0, 40) + '...' : video.videoUrl;
+            info.innerHTML = `
+              <p class="font-semibold text-base sm:text-lg text-blue-300 mb-1">Ready to Download</p>
+              <p class="text-xs text-gray-400 mb-2 break-words" title="${video.videoUrl}">
+                Source: ${shortUrl}
+              </p>
+              <div class="flex gap-2 flex-wrap justify-center sm:justify-start">
+                <span class="inline-block px-2 py-1 rounded text-xs font-bold ${
+                  video.type === "direct"
+                    ? "bg-green-900 text-green-300"
+                    : video.type === "youtube" 
+                    ? "bg-red-900 text-red-300"
+                    : "bg-yellow-900 text-yellow-300"
+                }">
+                  ${video.type.toUpperCase()}
+                </span>
+                ${
+                  video.size
+                    ? `<span class="inline-block px-2 py-1 rounded text-xs font-bold bg-gray-600 text-gray-300">${video.size}</span>`
+                    : ""
+                }
+                ${
+                  video.quality
+                    ? `<span class="inline-block px-2 py-1 rounded text-xs font-bold bg-purple-900 text-purple-300">${video.quality}</span>`
+                    : ""
+                }
+              </div>
+            `;
+          } else {
+            const shortUrl = video.videoUrl.length > 35 ? video.videoUrl.substring(0, 35) + '...' : video.videoUrl;
+            info.innerHTML = `
+              <p class="font-semibold text-sm">Video ${index + 1}</p>
+              <p class="text-xs text-gray-400 mb-1 break-words" title="${video.videoUrl}">
+                ${shortUrl}
+              </p>
+              <div class="flex gap-1 sm:gap-2 flex-wrap justify-center sm:justify-start">
+                <span class="inline-block px-2 py-0.5 rounded text-xs font-bold ${
+                  video.type === "direct"
+                    ? "bg-green-900 text-green-300"
+                    : video.type === "youtube" 
+                    ? "bg-red-900 text-red-300"
+                    : "bg-yellow-900 text-yellow-300"
+                }">
+                  ${video.type.toUpperCase()}
+                </span>
+                ${
+                  video.size
+                    ? `<span class="inline-block px-2 py-0.5 rounded text-xs font-bold bg-gray-600 text-gray-300">${video.size}</span>`
+                    : ""
+                }
+                ${
+                  video.quality
+                    ? `<span class="inline-block px-2 py-0.5 rounded text-xs font-bold bg-purple-900 text-purple-300">${video.quality}</span>`
+                    : ""
+                }
+              </div>
+            `;
+          }
+
+          const btn = document.createElement("button");
+          btn.type = "button"; // Prevent form submission
+          
+          // Enhanced button for single video with mobile responsiveness
+          if (videos.length === 1) {
+            btn.className =
+              "video-button single-video-button bg-blue-600 hover:bg-blue-500 text-white font-semibold py-3 px-4 sm:px-6 rounded-lg transition transform hover:scale-105 shrink-0 shadow-lg w-full sm:w-auto";
+            btn.innerHTML = `
+              <div class="flex items-center justify-center gap-2">
+                <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                </svg>
+                <span>Download Video</span>
+              </div>
+            `;
+          } else {
+            btn.className =
+              "video-button bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium py-2 px-3 sm:py-1.5 sm:px-3 rounded transition shrink-0 w-full sm:w-auto";
+            btn.innerHTML = `
+              <div class="flex items-center justify-center gap-1">
+                <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3"></path>
+                </svg>
+                <span>Download</span>
+              </div>
+            `;
+          }
+          
+          btn.onclick = (e) => {
+            e.preventDefault(); // Prevent any form submission
+            e.stopPropagation(); // Stop event bubbling
+            console.log('Individual video download clicked:', video);
+            
+            // Visual feedback - disable this button and show loading
+            btn.disabled = true;
+            if (videos.length === 1) {
+              btn.innerHTML = `
+                <div class="flex items-center justify-center gap-2">
+                  <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-white"></div>
+                  <span>Starting...</span>
+                </div>
+              `;
+            } else {
+              btn.innerHTML = `
+                <div class="flex items-center justify-center gap-1">
+                  <div class="animate-spin rounded-full h-3 w-3 border-b-2 border-white"></div>
+                  <span>Starting...</span>
+                </div>
+              `;
+            }
+            btn.classList.add("opacity-75");
+            
+            // Reset other buttons
+            const allDownloadBtns = document.querySelectorAll('#resultsList button');
+            allDownloadBtns.forEach(otherBtn => {
+              if (otherBtn !== btn) {
+                otherBtn.disabled = false;
+                const isOtherSingle = otherBtn.classList.contains('single-video-button');
+                if (isOtherSingle) {
+                  otherBtn.innerHTML = `
+                    <div class="flex items-center justify-center gap-2">
+                      <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                      </svg>
+                      <span>Download Video</span>
+                    </div>
+                  `;
+                } else {
+                  otherBtn.innerHTML = `
+                    <div class="flex items-center justify-center gap-1">
+                      <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3"></path>
+                      </svg>
+                      <span>Download</span>
+                    </div>
+                  `;
+                }
+                otherBtn.classList.remove("opacity-75");
+              }
+            });
+            
+            startDownload(video);
+            
+            // Reset button after a delay
+            setTimeout(() => {
+              btn.disabled = false;
+              if (videos.length === 1) {
+                btn.innerHTML = `
+                  <div class="flex items-center justify-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path>
+                    </svg>
+                    <span>Download Video</span>
+                  </div>
+                `;
+              } else {
+                btn.innerHTML = `
+                  <div class="flex items-center justify-center gap-1">
+                    <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3"></path>
+                    </svg>
+                    <span>Download</span>
+                  </div>
+                `;
+              }
+              btn.classList.remove("opacity-75");
+            }, 5000);
+          };
+
+          item.appendChild(img);
+          item.appendChild(info);
+          item.appendChild(btn);
+          listContainer.appendChild(item);
         });
 
-        function startDownload(videoData) {
-            // Show buffering status above list
-            const bufferStatus = document.getElementById('bufferStatus');
-            if (bufferStatus) {
-                bufferStatus.classList.remove('hidden');
-                bufferStatus.innerHTML = `
-                    <div class="flex items-center space-x-2 text-yellow-300">
-                        <div class="animate-spin rounded-full h-4 w-4 border-b-2 border-current"></div>
-                        <span class="font-semibold">Buffering & Processing Video... Download will start soon.</span>
-                    </div>
-                 `;
-            }
+        // Append after bufferStatus (which is after statusArea)
+        bufferStatus.insertAdjacentElement("afterend", listContainer);
+      }
 
-            // Trigger actual download via hidden iframe or window location
-            const downloadUrl = `/api/download?videoUrl=${encodeURIComponent(videoData.videoUrl)}&type=${videoData.type}`;
-            window.location.href = downloadUrl;
+      function setUIState(state, title = "", message = "", options = {}) {
+        const {
+          hideSearching = false,
+          hideProcessing = false,
+          persistent = false,
+          keepResults = false
+        } = options;
+
+        // Update state management
+        DownloadState.setPhase(state);
+
+        statusArea.classList.remove(
+          "hidden",
+          "bg-blue-900/50",
+          "text-blue-200",
+          "bg-red-900/50",
+          "text-red-200",
+          "bg-green-900/50",
+          "text-green-200"
+        );
+        statusArea.classList.add("flex");
+        loader.classList.add("hidden");
+
+        // Handle buffer/processing status visibility
+        const bufferStatus = document.getElementById("bufferStatus");
+        if (hideProcessing && bufferStatus) {
+          bufferStatus.classList.add("hidden");
         }
 
-        function renderVideoList(videos) {
-            // Check if list already exists (to prevent duplicates if re-rendering)
-            let listContainer = document.getElementById('resultsList');
-            if (listContainer) listContainer.remove();
-
-            listContainer = document.createElement('div');
-            listContainer.id = 'resultsList';
-            listContainer.className = 'mt-6 bg-gray-800 rounded-lg p-4 border border-gray-700 space-y-3';
-
-            // Add Buffering Status Area ABOVE the items
-            const bufferDiv = document.createElement('div');
-            bufferDiv.id = 'bufferStatus';
-            bufferDiv.className = 'hidden mb-4 p-3 bg-yellow-900/40 border border-yellow-700 rounded text-sm';
-            listContainer.appendChild(bufferDiv);
-
-            videos.forEach((video, index) => {
-                const item = document.createElement('div');
-                item.className = 'flex items-center gap-4 bg-gray-700 p-3 rounded hover:bg-gray-600 transition';
-
-                // Thumbnail
-                const img = document.createElement('img');
-                img.src = video.thumbnail;
-                img.className = 'w-24 h-16 object-cover rounded bg-gray-800';
-                img.onerror = () => { img.src = 'https://via.placeholder.com/150?text=No+Img'; };
-
-                const info = document.createElement('div');
-                info.className = 'text-sm text-gray-200 overflow-hidden flex-1';
-                info.innerHTML = `
-                    <p class="font-semibold">Video ${index + 1}</p>
-                    <p class="text-xs text-gray-400 truncate w-full" title="${video.videoUrl}">${video.videoUrl}</p>
-                    <div class="flex gap-2 mt-1">
-                        <span class="inline-block px-2 py-0.5 rounded text-xs font-bold ${video.type === 'direct' ? 'bg-green-900 text-green-300' : 'bg-yellow-900 text-yellow-300'}">
-                            ${video.type.toUpperCase()}
-                        </span>
-                        ${video.size ? `<span class="inline-block px-2 py-0.5 rounded text-xs font-bold bg-gray-600 text-gray-300">${video.size}</span>` : ''}
-                    </div>
-                `;
-
-                const btn = document.createElement('button');
-                btn.className = 'bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium py-1.5 px-3 rounded transition shrink-0';
-                btn.innerText = 'Download';
-                btn.onclick = () => startDownload(video);
-
-                item.appendChild(img);
-                item.appendChild(info);
-                item.appendChild(btn);
-                listContainer.appendChild(item);
-            });
-
-            // Append after status area
-            statusArea.insertAdjacentElement('afterend', listContainer);
+        // Handle searching message - hide it when videos are found
+        if (hideSearching || state === "success" || state === "error") {
+          // Searching is complete, hide the searching message
+          statusArea.classList.add("hidden");
+          loader.classList.add("hidden");
         }
 
-        function setUIState(state, title = '', message = '') {
-            statusArea.classList.remove('hidden', 'bg-blue-900/50', 'text-blue-200', 'bg-red-900/50', 'text-red-200', 'bg-green-900/50', 'text-green-200');
-            statusArea.classList.add('flex');
-            loader.classList.add('hidden');
+        // Remove existing list ONLY if loading (new search) and not keeping results
+        if (state === "loading" && !keepResults) {
+          const existingList = document.getElementById("resultsList");
+          if (existingList) existingList.remove();
+          DownloadState.lastSearchResults = null;
+        }
+
+        // Ensure inputs are visible (restore from previous state if needed)
+        document
+          .getElementById("downloadForm")
+          .querySelector("div")
+          .classList.remove("hidden");
+        submitBtn.classList.remove("hidden");
+
+        if (state === "idle") {
+          statusArea.classList.add("hidden");
+          if (bufferStatus) bufferStatus.classList.add("hidden");
+          return;
+        }
+
+        // Only show status area for loading, success, and error states
+        if (state === "loading" || state === "success" || state === "error") {
+          statusArea.classList.remove("hidden");
+          statusTitle.innerText = title;
+          statusMessage.innerText = message;
+        }
+
+        if (state === "loading") {
+          statusArea.classList.add("bg-blue-900/50", "text-blue-200");
+          loader.classList.remove("hidden");
+          submitBtn.disabled = true;
+          submitBtn.innerText = "Processing...";
+          DownloadState.setButton(false, "Processing...");
+        } else if (state === "success") {
+          statusArea.classList.add("bg-green-900/50", "text-green-200");
+          // Don't automatically re-enable button here, wait for user action
+          if (!persistent) {
             submitBtn.disabled = false;
-            submitBtn.innerText = 'Download Video';
-
-            // Remove existing list ONLY if loading (new search)
-            if (state === 'loading') {
-                const existingList = document.getElementById('resultsList');
-                if (existingList) existingList.remove();
-            }
-
-            // Ensure inputs are visible (restore from previous state if needed)
-            document.getElementById('downloadForm').querySelector('div').classList.remove('hidden');
-            submitBtn.classList.remove('hidden');
-
-            if (state === 'idle') {
-                statusArea.classList.add('hidden');
-                return;
-            }
-
-            statusTitle.innerText = title;
-            statusMessage.innerText = message;
-
-            if (state === 'loading') {
-                statusArea.classList.add('bg-blue-900/50', 'text-blue-200');
-                loader.classList.remove('hidden');
-                submitBtn.disabled = true;
-                submitBtn.innerText = 'Processing...';
-            } else if (state === 'success') {
-                statusArea.classList.add('bg-green-900/50', 'text-green-200');
-            } else if (state === 'error') {
-                statusArea.classList.add('bg-red-900/50', 'text-red-200');
-            }
+            submitBtn.innerText = "Download Video";
+            DownloadState.setButton(true, "Download Video");
+          }
+        } else if (state === "error") {
+          statusArea.classList.add("bg-red-900/50", "text-red-200");
+          submitBtn.disabled = false;
+          submitBtn.innerText = "Download Video";
+          DownloadState.setButton(true, "Download Video");
         }
+      }
     </script>
-</body>
-
+  </body>
 </html>
